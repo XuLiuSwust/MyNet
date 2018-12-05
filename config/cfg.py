@@ -4,12 +4,13 @@ dataset_params = {
 }
 
 common_params = {
-  'batch_size'   : 64,
+  'net_name'     : 'vgg11',
+  'batch_size'   : 128,
   'image_size'   : (32, 32),
-  'learning_rate': 0.1,
+  'learning_rate': 0.01,
   'moment'       : 0.9,
   'display_step' : 100,
-  'num_epochs'   : 200,
+  'num_epochs'   : 500,
   'predict_step' : 500
 }
 
@@ -30,12 +31,16 @@ net_style = ['vgg11', 'vgg13', 'vgg16', 'vgg19',
              'SqueezeNetA', 'SqueezeNetB',
              'SE_Resnet_50', 'SE_Resnet_101']
 
+HEIGHT = 32
+WIDTH = 32
+NUM_CHANNELS = 3
+DEFAULT_IMAGE_BYTES = HEIGHT * WIDTH * NUM_CHANNELS
+# The record is the image plus a one-byte label
+RECORD_BYTES = DEFAULT_IMAGE_BYTES + 1
+NUM_CLASSES = 10
+NUM_DATA_FILES = 5
+NUM_IMAGES = {'train': 50000, 'validation': 10000, }
 
-def merge_params(FLAGS):
-  common_params['batch_size'] = FLAGS.batch_size
-  common_params['learning_rate'] = FLAGS.lr
-  common_params['moment'] = FLAGS.moment
-  common_params['display_step'] = FLAGS.display_step
-  common_params['num_epochs'] = FLAGS.num_epochs
-  common_params['predict_step'] = FLAGS.predict_step
-  return common_params
+net_layers = {
+  'VGG11': [64, 'M', 128, 'M', 256, 256, 'M', 512, 512, 'M', 512, 512, 'M'],
+}
