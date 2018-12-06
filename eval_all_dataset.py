@@ -1,77 +1,25 @@
+"""
+该文件是在整个数据集上进行整体评估, 是以60000张图片作为数据的评估
+"""
+
 import os
 
 import tensorflow as tf
 
-import config.cfg as cfg
-
-
-def parse_record(raw_record, is_training):
-  record_vector = tf.decode_raw(raw_record, tf.uint8)
-  label = tf.cast(record_vector[0], tf.int32)
-  depth_major = tf.reshape(record_vector[1:cfg.RECORD_BYTES],
-                           [cfg.NUM_CHANNELS, cfg.HEIGHT, cfg.WIDTH])
-
-  image = tf.cast(tf.transpose(depth_major, [1, 2, 0]), tf.float32)
-  image = preprocess_image(image, is_training)
-  return image, label
-
-
-def preprocess_image(image, is_training):
-  """
-  图像预处理
-  """
-  if is_training:
-    # 调整图像到固定大小
-    # 剪裁的时候, 从图像的中心进行的剪裁
-    image = tf.image.resize_image_with_crop_or_pad(
-      image, cfg.HEIGHT + 8, cfg.WIDTH + 8)
-
-    # 随机选择位置进行剪裁
-    image = tf.random_crop(image, [cfg.HEIGHT, cfg.WIDTH, cfg.NUM_CHANNELS])
-
-    # 1/2的概率随机左右翻转
-    image = tf.image.random_flip_left_right(image)
-    #image = tf.image.random_flip_up_down(image)
-
-    # 图像色彩调整 ##############################################################
-    # 随机设置图片的亮度
-    image = tf.image.random_brightness(image, max_delta=30)
-    # 随机设置图片的对比度
-    image = tf.image.random_contrast(image, lower=0.2, upper=1.8)
-    # 随机设置图片的色度
-    image = tf.image.random_hue(image, max_delta=0.3)
-    # 随机设置图片的饱和度
-    image = tf.image.random_saturation(image, lower=0.2, upper=1.8)
-
-  # 标准化, 零均值, 单位方差, 输出大小和输入一样
-  image = tf.image.per_image_standardization(image)
-  return image
-
-def get_filenames(is_training, data_dir):
-  """Returns a list of filenames."""
-  data_dir = os.path.join(data_dir, 'cifar-10-batches-bin')
-
-  assert os.path.exists(data_dir), (
-    'Run cifar10_download_and_extract.py first to download and extract the '
-    'CIFAR-10 data.')
-
-  if is_training:
-    return [
-      os.path.join(data_dir, 'data_batch_%d.bin' % i)
-      for i in range(1, cfg.NUM_DATA_FILES + 1)
-    ]
-  else:
-    return [os.path.join(data_dir, 'test_batch.bin')]
+import cfg
+from net_train import CifarData
 
 
 def input_fn_test(dataset_params):
   data_dir = dataset_params['data_path']
   batch_size = cfg.NUM_IMAGES['validation']
-  filenames = get_filenames(False, data_dir)
+
+  cifar_dataset = CifarData()
+  filenames = cifar_dataset.get_filenames(False, data_dir)
   dataset = tf.data.FixedLengthRecordDataset(filenames, cfg.RECORD_BYTES)
   dataset = dataset.prefetch(buffer_size=batch_size)
   dataset = dataset.apply(tf.contrib.data.map_and_batch(
-    lambda value: parse_record(value, False),
+    lambda value: cifar_dataset.parse_record(value, False),
     batch_size=batch_size,
     num_parallel_batches=1,
     drop_remainder=False))
@@ -85,7 +33,7 @@ def cifar_dataset_test(dataset_params):
   return dataset
 
 
-def main_test(_):
+def main(argv=None):
   model_folder = os.path.join(cfg.dataset_params['model_path'],
                               cfg.common_params['net_name'], 'ckpt')
   checkpoint = tf.train.get_checkpoint_state(model_folder)
@@ -121,6 +69,9 @@ def main_test(_):
       count += 1
 
 
+# 如果你的代码中的入口函数不叫main()，而是一个其他名字的函数，如test()，则你应该这样写入口
+# tf.app.run(test())
+# 如果你的代码中的入口函数叫main()，则你就可以把入口写成tf.app.run()
 if __name__ == '__main__':
   tf.logging.set_verbosity(tf.logging.INFO)
-  tf.app.run(main_test)
+  tf.app.run()
