@@ -4,7 +4,7 @@ dataset_params = {
 }
 
 common_params = {
-  'net_name'     : 'resnet20',
+  'net_name'     : 'DenseNet40_12',
   'batch_size'   : 64,
   'image_size'   : (32, 32),
   'learning_rate': 0.01,
@@ -24,7 +24,7 @@ net_style = ['vgg11', 'vgg13', 'vgg16', 'vgg19',
              'resnet20', 'resnet32', 'resnet44', 'resnet56',
              'XceptionNet',
              'MobileNet',
-             'DensetNet40_12', 'DenseNet100_12', 'DenseNet100_24',
+             'DenseNet40_12', 'DenseNet100_12', 'DenseNet100_24',
              'DenseNetBC100_12', 'DenseNetBC250_24', 'DenseNetBC190_40',
              'ResNext50', 'ResNext101',
              'SqueezeNetA', 'SqueezeNetB',
@@ -87,5 +87,12 @@ net_layers = {
 
     [[[3, 64, 2], [3, 64, 1]], 1],
     [[[3, 64, 1], [3, 64, 1]], 17],
-  ]
+  ],
+  # L=40, k=12
+  'DenseNet40_12': [40, 12],
+  'DenseNet100_12': [100, 12],
+  'DenseNet100_24': [100, 12],
+  'DenseNetBC100_12': [100, 12],
+  'DenseNetBC250_24': [250, 24],
+  'DenseNetBC190_40': [190, 40]
 }
