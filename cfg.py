@@ -5,12 +5,12 @@ dataset_params = {
 
 common_params = {
   'net_name'     : 'DenseNet40_12',
-  'batch_size'   : 64,
+  'batch_size'   : 128,
   'image_size'   : (32, 32),
   'learning_rate': 0.01,
   'moment'       : 0.9,
   'display_step' : 100,
-  'num_epochs'   : 500
+  'num_epochs'   : 300
 }
 
 graph_node = {
@@ -28,7 +28,7 @@ net_style = ['vgg11', 'vgg13', 'vgg16', 'vgg19',
              'DenseNetBC100_12', 'DenseNetBC250_24', 'DenseNetBC190_40',
              'ResNext50', 'ResNext101',
              'SqueezeNetA', 'SqueezeNetB',
-             'SE_Resnet_50', 'SE_Resnet_101']
+             'SE_Resnet_20', 'SE_Resnet_50', 'SE_Resnet_101']
 
 HEIGHT = 32
 WIDTH = 32

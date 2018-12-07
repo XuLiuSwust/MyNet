@@ -8,113 +8,125 @@ os.environ['CUDA_VISIBLE_DEVICE'] = '1'
 
 
 # 构造网络 ######################################################################
-class DenseNet(object):
-  def __init__(self, densename, is_training, keep_prob=0.5, base=True):
-    super(DenseNet, self).__init__()
+class SeNet(object):
+  def __init__(self, resname, is_training, keep_prob=0.5, num_classes=10):
+    super(SeNet, self).__init__()
+    self.sename = sename
+    self.num_classes = num_classes
 
-    self.densename = densename
-    self.num_classes = cfg.NUM_CLASSES
+    # self.regularizer = tf.contrib.layers.l2_regularizer(scale=5e-4)
+    # self.initializer = tf.contrib.layers.xavier_initializer()
+    self.weight_decay = 1e-4
+    self.regularizer = tf.contrib.layers.l2_regularizer(scale=self.weight_decay)
+    self.initializer = tf.contrib.layers.xavier_initializer()
+
     self.is_training = is_training
     self.keep_prob = keep_prob
 
-    self.k = cfg.net_layers[densename][1]
-    self.L = cfg.net_layers[densename][0]
-    self.base = base
-    self.per_block_num = (self.L - 4) // 3 if self.base else (self.L - 4) // 6
+  def forward(self, inputs):
+    """
+    SeNetforcifar见下
+    """
+    # conv1
+    out = self.conv2d(inputs=inputs, out_channel=16, kernel_size=3, strides=1)
 
-    self.regularizer = tf.contrib.layers.l2_regularizer(scale=5e-4)
-    self.initializer = tf.contrib.layers.xavier_initializer()
+    block_sizes = cfg.net_layers[self.resname]
+    for bs in block_sizes:
+      out = self.SeNet_block(out, block_size=bs[0], num_repeated=bs[1])
 
-  def forward(self, input):
-    # densenet的结构就是这样的三块dense_block
-    out = self.conv2d(input, 2 * self.k, 3, 1)
-    # denseblock1
-    out = self.dense_block(out)
-    # transition layer1
-    out = self.transition_layer(out)
-    # denseblock2
-    out = self.dense_block(out)
-    # transition layer2
-    out = self.transition_layer(out)
-    # denseblock3
-    out = self.dense_block(out)
-    # classification layer
-    # out = tf.keras.layers.GlobalAveragePooling2D(
-    #   data_format='channels_last')(out)
-    out = tf.layers.average_pooling2d(
-      out, pool_size=8, strides=8, padding='same'
-    )
+    # 这里的输出是8x8的
+    out = tf.layers.average_pooling2d(out, pool_size=8, strides=1)
     out = tf.layers.flatten(out, name='flatten')
-    out = tf.layers.dropout(out, rate=self.keep_prob)
     predicts = tf.layers.dense(
-      out, units=self.num_classes,
-      kernel_initializer=self.initializer,
+      out, units=self.num_classes, kernel_initializer=self.initializer,
       kernel_regularizer=self.regularizer
     )
     softmax_out = tf.nn.softmax(predicts, name='output')
-
     return predicts, softmax_out
 
-
-def conv2d(self, inputs, out_channel, kernel_size=3, strides=1):
-  """
-  Conv-BN-ReLU
-  """
-  inputs = tf.layers.conv2d(
-    inputs, filters=out_channel, kernel_size=kernel_size,
-    strides=strides, padding='same',
-    kernel_initializer=self.initializer,
-    kernel_regularizer=self.regularizer
-  )
-  return inputs
-
-
-def dense_conv2d(self, inputs, out_channel, kernel_size=3, strides=1):
-  inputs = tf.layers.batch_normalization(inputs, training=self.is_training)
-  inputs = tf.nn.relu(inputs)
-  if self.base:
-    inputs = self.conv2d(inputs, out_channel, kernel_size, strides)
-  else:
-    inputs = self.conv2d(inputs, out_channel, kernel_size=1, strides=1)
-    inputs = tf.layers.batch_normalization(inputs, training=self.is_training)
-    inputs = tf.nn.relu(out)
-    inputs = self.conv2d(inputs, out_channel, kernel_size, strides)
-  return inputs
-
-
-def dense_block(self, inputs):
-  # 对于从支路的角度来看, 实际上就是支路逐渐变宽的过程
-  # 分析可见https://github.com/lartpang/ML_markdown/issues/24
-  internel_out = tf.identity(inputs)
-  for i in range(self.per_block_num):
-    # 对于卷积而言, 输入的就是卷叠加后的输出
-    inputs = self.dense_conv2d(
-      internel_out, out_channel=self.k, kernel_size=3
+  def conv2d(self, inputs, out_channel, kernel_size=3, strides=1, relu=True):
+    inputs = tf.layers.conv2d(
+      inputs, filters=out_channel, kernel_size=kernel_size, strides=strides,
+      padding='same', kernel_initializer=self.initializer,
+      kernel_regularizer=self.regularizer
     )
-    # 对于叠加而言, 就是卷积后的输出和快速通道的拼接
-    internel_out = tf.concat((inputs, internel_out), axis=-1)
-  return internel_out
+    inputs = tf.layers.batch_normalization(
+      inputs, training=self.is_training
+    )
+    inputs = tf.nn.relu(inputs) if relu else inputs
+    return inputs
 
-  return inputs
+  def resnet_block(self, inputs, block_size, num_repeated):
+    """
+    完成卷积, 池化的搭建
+    完成跳跃链接的搭建, 不同的路线最后是相加的处理
+    """
+    # 重复残差块
+    for index_repeated in range(num_repeated):
+      # 开始一个分支
+      short_cut = tf.identity(inputs)
+      input_channel = short_cut.shape[-1]
+      input_width = short_cut.shape[-2]
 
+      # 重复残差块内的卷积
+      for param in block_size:
+        inputs = self.conv2d(
+          inputs, out_channel=param[1], kernel_size=param[0], strides=param[2],
+          relu=bool(param[3])
+        )
 
-def transition_layer(self, inputs):
-  out_channel = inputs.shape[-1] if self.base else inputs.shape[-1] // 2
-  inputs = tf.layers.batch_normalization(inputs, training=self.is_training)
-  inputs = tf.nn.relu(inputs)
-  inputs = self.conv2d(inputs, out_channel, 1, 1)
-  inputs = tf.layers.max_pooling2d(
-    inputs, pool_size=2, strides=2, padding='same'
-  )
-  return inputs
+      print("se之前", inputs.shape)
+      inputs = self.senet_block(inputs)
+      print("se之后", inputs.shape)
 
+      # 保证通道数目相同, 以及宽高数据相同, 这里只实现了保证通道数目相同
+      output_channel = inputs.shape[-1]
+      output_width = inputs.shape[-2]
+      if input_channel != output_channel or input_width != output_width:
+        # 这里的对于快速链接也需要调整宽高
+        short_cut = self.conv2d(
+          short_cut, out_channel=output_channel, kernel_size=1, strides=2,
+          relu=False
+        )
 
-def loss(self, predicts, labels):
-  losses = tf.reduce_mean(
-    tf.losses.sparse_softmax_cross_entropy(labels, predicts))
-  l2_reg = tf.losses.get_regularization_losses()
-  losses += tf.add_n(l2_reg)
-  return losses
+      # todo: 实现在残差块之后, 添加 global_pooling->FC->ReLu->FC->Sigmoid,再实现
+      inputs = tf.nn.relu(tf.add(inputs, short_cut))
+      # 合并分支
+      return inputs
+
+  def senet_block(self, inputs):
+    short_cut_se = tf.identity(inputs)
+
+    inputs_height, inputs_width = inputs.shape[1:3]
+    inputs = tf.layers.average_pooling2d(
+      inputs, [inputs_height, inputs_width], [inputs_height, inputs_width],
+      padding='same'
+    )
+
+    inputs = tf.layers.flatten(inputs)
+    inputs = tf.layers.dense(
+      inputs, units=self.num_classes,
+      activation='relu',
+      kernel_initializer=self.initializer,
+      kernel_regularizer=self.regularizer
+    )
+    inputs = tf.layers.dense(
+      inputs, units=self.num_classes,
+      activation='sigmoid',
+      kernel_initializer=self.initializer,
+      kernel_regularizer=self.regularizer
+    )
+    inputs = tf.expand_dims(inputs, [1, 2])
+
+    return tf.multiply(short_cut_se, inputs)
+
+  def loss(self, predicts, labels):
+    losses = tf.reduce_mean(
+      tf.losses.sparse_softmax_cross_entropy(labels, predicts)
+    )
+    l2_reg = tf.losses.get_regularization_losses()
+    losses += tf.add_n(l2_reg)
+    return losses
 
 
 # 构造处理类 #####################################################################
@@ -383,33 +395,9 @@ class CifarData(object):
 
 
 # 网络入口 ######################################################################
-def DenseNet40_12(is_training=True, keep_prob=0.5):
-  net = DenseNet('DenseNet40_12', is_training, keep_prob)
-  return net
-
-
-def DenseNet100_12(is_training=True, keep_prob=0.5):
-  net = DenseNet('DenseNet100_12', is_training, keep_prob)
-  return net
-
-
-def DenseNet100_24(is_training=True, keep_prob=0.5):
-  net = DenseNet('DenseNet100_24', is_training, keep_prob)
-  return net
-
-
-def DenseNetBC100_12(is_training=True, keep_prob=0.5):
-  net = DenseNet('DenseNet100_12', is_training, keep_prob, base=False)
-  return net
-
-
-def DenseNetBC250_24(is_training=True, keep_prob=0.5):
-  net = DenseNet('DenseNet250_24', is_training, keep_prob, base=False)
-  return net
-
-
-def DenseNetBC190_40(is_training=True, keep_prob=0.5):
-  net = DenseNet('DenseNet190_40', is_training, keep_prob, base=False)
+def SeNet20(is_training=True, keep_prob=0.5):
+  net = SeNet(resname='ResNet20', is_training=is_training,
+              keep_prob=keep_prob)
   return net
 
 
