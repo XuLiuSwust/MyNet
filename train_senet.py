@@ -99,7 +99,7 @@ class SeNet(object):
 
     inputs_height, inputs_width = inputs.shape[1:3]
     inputs = tf.layers.average_pooling2d(
-      inputs, [inputs_height, inputs_width], [inputs_height, inputs_width],
+      inputs, (inputs_height, inputs_width), (inputs_height, inputs_width),
       padding='same'
     )
 

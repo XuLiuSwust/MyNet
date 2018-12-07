@@ -9,13 +9,11 @@ os.environ['CUDA_VISIBLE_DEVICE'] = '1'
 
 # 构造网络 ######################################################################
 class SqueezeNet(object):
-  """docstring for ResNet"""
-
-  def __init__(self, resname, is_training, keep_prob=0.5, num_classes=10):
-    super(ResNet, self).__init__()
-    self.resname = resname
+  def __init__(self, squeezename, is_training, keep_prob=0.5, num_classes=10):
+    super(SqueezeNet, self).__init__()
+    self.squeezename = squeezename
     self.num_classes = num_classes
-
+    self.short_cut = cfg.net_layers[squeezename]
     self.regularizer = tf.contrib.layers.l2_regularizer(scale=5e-4)
     self.initializer = tf.contrib.layers.xavier_initializer()
 
@@ -23,69 +21,82 @@ class SqueezeNet(object):
     self.keep_prob = keep_prob
 
   def forward(self, inputs):
-    """
-    ResNetforcifar见下
-    """
-    # conv1
-    out = self.conv2d(inputs=inputs, out_channel=16, kernel_size=3, strides=1)
+    with tf.name_scope('squeezenet'):
+      height, width = inputs.shape[1:3]
+      out = self.conv2d(
+        inputs=inputs, out_channel=96, kernel_size=7, strides=2, name='conv1'
+      )
+      out = tf.layers.average_pooling2d(
+        out, pool_size=3, strides=2, name='maxpool1'
+      )
+      # 这里要考虑特定结构存在的差异性, 所以独立出来构造函数
+      out = self.make_layers(inputs)
+      out = self.conv2d(
+        inputs=inputs, out_channel=1000, kernel_size=1, strides=1, name='conv10'
+      )
+      # 缩放为/16
+      pool_height, pool_width = height // 16, width // 16
+      out = tf.layers.average_pooling2d(
+        out, pool_size=(pool_height, pool_width),
+        strides=(pool_height, pool_width), name='avepool10'
+      )
+      out = tf.layers.flatten(out, name='flatten')
+      predicts = tf.layers.dense(
+        out, units=self.num_classes, kernel_initializer=self.initializer,
+        kernel_regularizer=self.regularizer, name='fc'
+      )
+      softmax_out = tf.nn.softmax(predicts, name='output')
+      return predicts, softmax_out
 
-    block_sizes = cfg.net_layers[self.resname]
-    for bs in block_sizes:
-      out = self.resnet_block(out, block_size=bs[0], num_repeated=bs[1])
+  def conv2d(
+      self, inputs, out_channel, kernel_size=3, strides=1, name='_', relu=True
+  ):
+    with tf.name_scope(name):
+      inputs = tf.layers.conv2d(
+        inputs, filters=out_channel, kernel_size=kernel_size, strides=strides,
+        padding='same', kernel_initializer=self.initializer,
+        kernel_regularizer=self.regularizer, name='conv'
+      )
+      inputs = tf.layers.batch_normalization(
+        inputs, training=self.is_training, name='BN'
+      )
+      inputs = tf.nn.relu(inputs) if relu else inputs
+      return inputs
 
-    # 这里的输出是8x8的
-    out = tf.layers.average_pooling2d(out, pool_size=8, strides=1)
-    out = tf.layers.flatten(out, name='flatten')
-    predicts = tf.layers.dense(
-      out, units=self.num_classes, kernel_initializer=self.initializer,
-      kernel_regularizer=self.regularizer
-    )
-    softmax_out = tf.nn.softmax(predicts, name='output')
-    return predicts, softmax_out
+  def make_short_cut(self, inputs):
+    pass
 
-  def conv2d(self, inputs, out_channel, kernel_size=3, strides=1, relu=True):
-    inputs = tf.layers.conv2d(
-      inputs, filters=out_channel, kernel_size=kernel_size, strides=strides,
-      padding='same', kernel_initializer=self.initializer,
-      kernel_regularizer=self.regularizer
+  def make_layers(self, inputs):
+    # inputs = self.make_short_cut(inputs)
+    inputs = self.fire_block(inputs, [16, 64, 64], name='fire2')
+    inputs = self.fire_block(inputs, [16, 64, 64], name='fire3')
+    inputs = self.fire_block(inputs, [32, 128, 128], name='fire4')
+    inputs = tf.layers.max_pooling2d(
+      inputs, 3, 2, padding='same', name='maxpool4'
     )
-    inputs = tf.layers.batch_normalization(
-      inputs, training=self.is_training
+    inputs = self.fire_block(inputs, [32, 128, 128], name='fire5')
+    inputs = self.fire_block(inputs, [48, 192, 192], name='fire6')
+    inputs = self.fire_block(inputs, [48, 192, 192], name='fire7')
+    inputs = self.fire_block(inputs, [64, 256, 256], name='fire8')
+    inputs = tf.layers.max_pooling2d(
+      inputs, 3, 2, padding='same', name='maxpool8'
     )
-    inputs = tf.nn.relu(inputs) if relu else inputs
+
+    if self.model == 'B':
+      short_cut_maxpool8 = tf.identity(inputs)
+    inputs = self.fire_block(inputs, [64, 256, 256], name='fire9')
+    if self.model == 'B':
+      inputs = tf.add(inputs, short_cut_maxpool8)
+
     return inputs
 
-  def resnet_block(self, inputs, block_size, num_repeated):
-    """
-    完成卷积, 池化的搭建
-    完成跳跃链接的搭建, 不同的路线最后是相加的处理
-    """
-    # 重复残差块
-    for index_repeated in range(num_repeated):
-      # 开始一个分支
-      short_cut = tf.identity(inputs)
-      input_channel = short_cut.shape[-1]
-      input_width = short_cut.shape[-2]
-
-      # 重复残差块内的卷积
-      for param in block_size:
-        inputs = self.conv2d(
-          inputs, out_channel=param[1], kernel_size=param[0], strides=param[2],
-          relu=bool(param[3])
-        )
-
-      # 保证通道数目相同, 以及宽高数据相同, 这里只实现了保证通道数目相同
-      output_channel = inputs.shape[-1]
-      output_width = inputs.shape[-2]
-      if input_channel != output_channel or input_width != output_width:
-        # 这里的对于快速链接也需要调整宽高
-        short_cut = self.conv2d(
-          short_cut, out_channel=output_channel, kernel_size=1, strides=2,
-          relu=False
-        )
-      print(inputs.shape, short_cut.shape)
-      inputs = tf.nn.relu(tf.add(inputs, short_cut))
-      # 合并分支
+  def fire_block(self, inputs, block_size, name='_'):
+    with tf.name_scope(name):
+      s1, e1, s3 = block_size
+      inputs = self.conv2d(inputs, s1, 1, 1, name='s1', relu=True)
+      inputs_e1 = self.conv2d(inputs, e1, 1, 1, name='e1', relu=True)
+      inputs_s3 = self.conv2d(inputs, s3, 3, 1, name='s3', relu=True)
+      inputs = tf.concat([inputs_e1, inputs_s3], axis=-1)
       return inputs
 
   def loss(self, predicts, labels):
@@ -363,23 +374,27 @@ class CifarData(object):
 
 
 # 网络入口 ######################################################################
-def resnet20(is_training=True, keep_prob=0.5):
-  net = ResNet(resname='ResNet20', is_training=is_training, keep_prob=keep_prob)
+def SqueezeNetA(is_training=True, keep_prob=0.5):
+  # 没有short_cut
+  net = SqueezeNet(
+    squeezename='SqueezeNetA', is_training=is_training, keep_prob=keep_prob
+  )
   return net
 
 
-def resnet32(is_training=True, keep_prob=0.5):
-  net = ResNet(resname='ResNet32', is_training=is_training, keep_prob=keep_prob)
+def SqueezeNetB(is_training=True, keep_prob=0.5):
+  # 有简单的short_cut
+  net = SqueezeNet(
+    squeezename='SqueezeNetB', is_training=is_training, keep_prob=keep_prob
+  )
   return net
 
 
-def resnet44(is_training=True, keep_prob=0.5):
-  net = ResNet(resname='ResNet44', is_training=is_training, keep_prob=keep_prob)
-  return net
-
-
-def resnet56(is_training=True, keep_prob=0.5):
-  net = ResNet(resname='ResNet56', is_training=is_training, keep_prob=keep_prob)
+def SqueezeNetB(is_training=True, keep_prob=0.5):
+  # 有复杂的short_cut
+  net = SqueezeNet(
+    squeezename='SqueezeNetC', is_training=is_training, keep_prob=keep_prob
+  )
   return net
 
 
